@@ -53,13 +53,13 @@ class_bot.py (Bot Utama)
 
 ## 🧠 Model yang Digunakan
 
-### 1. **TinyLlama-1.1B-Chat-v1.0** (AI Chat)
+### 1. **Qwen/Qwen2-1.5B-Instruct** (AI Chat)
 - **Fungsi**: Menghasilkan respons otomatis dalam percakapan
-- **Ukuran**: 1.1 Miliar parameter (ringan dan cepat)
+- **Ukuran**: 1.5 Miliar parameter (ringan dan cepat)
 - **Device**: Otomatis menggunakan GPU (CUDA) jika tersedia, jika tidak menggunakan CPU
 - **Proses**:
   1. Pesan user di-tokenize
-  2. Model generate respons dengan max_length=100 token
+  2. Model generate respons dengan max_length=500 token
   3. Respons dibersihkan dan dikirim ke Discord
 
 ### 2. **Keras Model** (Klasifikasi Burung)
@@ -162,7 +162,7 @@ If NO → Generate AI reply
 
 ## 📊 Performa Model
 
-### TinyLlama pada CPU
+### Qwen pada CPU
 - **Waktu Generation**: ~1-3 detik per respons
 - **Memory**: ~2-3 GB RAM
 - **Skalabilitas**: Cocok untuk deployment di resource terbatas
