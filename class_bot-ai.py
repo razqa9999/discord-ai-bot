@@ -73,8 +73,8 @@ async def on_message(msg):
             "I couldn't say a SERIOUSLY reply just now. Try again SERIOUSLY?",
         ])
         await msg.channel.send(fallback)
-MYMODEL_NAME = "TinyLlama/TinyLlama-1.1B-Chat-v1.0"
-# Smaller & faster model for CPU/limited resource systems (1.1B params)
+MYMODEL_NAME = "Qwen/Qwen2-1.5B-Instruct"
+# Smaller & faster model for CPU/limited resource systems (1.5B params)
 print("Loading model... this may take a while on first run")
 tokenizer = AutoTokenizer.from_pretrained(MYMODEL_NAME)
 # Set pad token to avoid attention mask warning
@@ -104,7 +104,7 @@ async def generate_ai_reply(user_input: str) -> str:
             outputs = model.generate(
                 input_ids,
                 attention_mask=attention_mask,
-                max_length=100,  # Reduced from 150 for faster generation
+                max_length=500,  # Reduced from 150 for faster generation
                 pad_token_id=tokenizer.eos_token_id,
                 do_sample=False,  # Non-sampling = faster (set to True for variety)
                 num_beams=1,      # No beam search = faster
@@ -325,5 +325,6 @@ async def deteksi(ctx):
         await ctx.send("Anda lupa mengunggah gambar :(")
 
 bot.run('YOUR_BOT_TOKEN_HERE')
+
 
 
