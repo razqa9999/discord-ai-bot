@@ -104,7 +104,7 @@ async def generate_ai_reply(user_input: str) -> str:
             outputs = model.generate(
                 input_ids,
                 attention_mask=attention_mask,
-                max_length=500,  # Reduced from 150 for faster generation
+                max_length=200, 
                 pad_token_id=tokenizer.eos_token_id,
                 do_sample=False,  # Non-sampling = faster (set to True for variety)
                 num_beams=1,      # No beam search = faster
@@ -325,6 +325,7 @@ async def deteksi(ctx):
         await ctx.send("Anda lupa mengunggah gambar :(")
 
 bot.run('YOUR_BOT_TOKEN_HERE')
+
 
 
 
