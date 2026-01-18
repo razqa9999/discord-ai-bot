@@ -44,37 +44,57 @@ async def on_message(msg):
         if not msg.content or len(msg.content) > 1000:
             return
         print(f"[AI] Processing message from {msg.author}: {msg.content[:50]}...")
-        reply = await generate_ai_reply(msg.content)
-        print(f"[AI] Generated reply: {reply[:100] if reply else 'EMPTY'}...")
-        # If reply exceeds Discord's 2000 character limit, save to a .txt and send as file
-        if reply and len(reply) > 2000:
-            fname = f"reply_{msg.id}.txt"
-            try:
-                with open(fname, "w", encoding="utf-8") as f:
-                    f.write(reply)
-                await msg.channel.send("Reply too long — sending as a .txt file:", file=discord.File(fname))
-            finally:
+        
+        # Send initial message and stream response
+        discord_msg = await msg.channel.send("⏳ Thinking...")
+        
+        # Stream the reply
+        full_reply = ""
+        update_counter = 0
+        async for chunk in generate_ollama_reply_stream(msg.content):
+            full_reply += chunk
+            update_counter += 1
+            # Update message every few chunks to show progress
+            if update_counter >= 5 or len(full_reply) > 1900:
                 try:
-                    os.remove(fname)
-                except Exception:
-                    pass
-        elif reply:
-            await msg.channel.send(reply)
+                    display_text = full_reply if full_reply else "⏳ Thinking..."
+                    if len(display_text) <= 2000:
+                        await discord_msg.edit(content=display_text)
+                    update_counter = 0
+                except Exception as e:
+                    print(f"[DEBUG] Message edit error: {e}")
+        
+        # Final update
+        if full_reply:
+            if len(full_reply) > 2000:
+                # Save to file if too long
+                fname = f"reply_{msg.id}.txt"
+                try:
+                    with open(fname, "w", encoding="utf-8") as f:
+                        f.write(full_reply)
+                    await msg.channel.send("Reply too long — sending as a .txt file:", file=discord.File(fname))
+                finally:
+                    try:
+                        os.remove(fname)
+                    except Exception:
+                        pass
+            else:
+                await discord_msg.edit(content=full_reply)
         else:
-            print("[AI] Reply is empty!")
-            await msg.channel.send("Hmm, I couldn't generate a proper reply right now.")
+            await discord_msg.edit(content="Hmm, I couldn't generate a proper reply right now.")
+            
     except Exception as e:
         # Don't crash the bot for a model error; log and fallback
         print(f"[ERROR] Error generating reply: {type(e).__name__}: {e}")
         import traceback
         traceback.print_exc()
         fallback = random.choice([
-            "Hmm, I'm not sure I SERIOUSLY understood that, can you SERIOUSLY rephrase?",
-            "I couldn't say a SERIOUSLY reply just now. Try again SERIOUSLY?",
+            "Hmm, I'm not sure I understood that, can you rephrase?",
+            "I couldn't generate a reply just now. Try again?",
         ])
         await msg.channel.send(fallback)
 MYMODEL_NAME = "Qwen/Qwen2-1.5B-Instruct"
-# Smaller & faster model for CPU/limited resource systems (1.5B params)
+# Smaller & faster model for CPU/limited resource systems (1.1B params)
 print("Loading model... this may take a while on first run")
 tokenizer = AutoTokenizer.from_pretrained(MYMODEL_NAME)
 # Set pad token to avoid attention mask warning
@@ -104,7 +124,7 @@ async def generate_ai_reply(user_input: str) -> str:
             outputs = model.generate(
                 input_ids,
                 attention_mask=attention_mask,
-                max_length=200, 
+                max_length=150, 
                 pad_token_id=tokenizer.eos_token_id,
                 do_sample=False,  # Non-sampling = faster (set to True for variety)
                 num_beams=1,      # No beam search = faster
@@ -122,6 +142,61 @@ async def generate_ai_reply(user_input: str) -> str:
     if not reply:
         return "Sorry, I couldn't think of a reply just now..."
     return reply
+
+# Ollama-based AI reply generator with streaming
+async def generate_ollama_reply_stream(user_input: str):
+    """Generate reply using local Ollama server with streaming at http://localhost:11434/"""
+    ollama_url = "http://localhost:11434/api/generate"
+    ollama_model = "gpt-oss:120b-cloud"
+    
+    # System prompt untuk mengatur perilaku model
+    system_prompt = """Anda adalah asisten bot Discord yang membantu. Ikuti panduan berikut:
+1. Jawab pertanyaan secara singkat dan ringkas secara default
+2. Jaga respons tetap pendek dan to the point (2-4 kalimat)
+3. Hanya berikan penjelasan detail ketika pengguna secara spesifik memintanya (frasa seperti "jelaskan", "ceritakan lebih lanjut", "detail", "elaborasi", dll)
+4. Jadilah ramah dan conversational
+5. Jika Anda tidak tahu sesuatu, katakan dengan jelas"""
+    
+    full_prompt = f"{system_prompt}\n\nPengguna: {user_input}\nAsisten:"
+    
+    payload = {
+        "model": ollama_model,
+        "prompt": full_prompt,
+        "stream": True
+    }
+    
+    try:
+        def stream_ollama():
+            import json
+            response = requests.post(ollama_url, json=payload, timeout=60, stream=True)
+            response.raise_for_status()
+            for line in response.iter_lines():
+                if line:
+                    try:
+                        data = json.loads(line)
+                        yield data.get("response", "")
+                    except:
+                        pass
+        
+        for chunk in await asyncio.to_thread(stream_ollama):
+            yield chunk
+    
+    except requests.exceptions.ConnectionError:
+        yield "⚠️ Ollama server is not running. Please start Ollama at http://localhost:11434/"
+    except requests.exceptions.Timeout:
+        yield "⚠️ Ollama server took too long to respond. Please try again."
+    except Exception as e:
+        print(f"[ERROR] Ollama error: {type(e).__name__}: {e}")
+        yield f"Sorry, there was an error: {str(e)}"
+
+# Backward compatibility: non-streaming version
+async def generate_ollama_reply(user_input: str) -> str:
+    """Generate reply using local Ollama server (non-streaming version)"""
+    full_reply = ""
+    async for chunk in generate_ollama_reply_stream(user_input):
+        full_reply += chunk
+    return full_reply
+
 # adding two numbers
 @bot.command()
 async def add(ctx, left: int, right: int):
@@ -324,8 +399,57 @@ async def deteksi(ctx):
     else:
         await ctx.send("Anda lupa mengunggah gambar :(")
 
-bot.run('YOUR_BOT_TOKEN_HERE')
+# Help command
+@bot.command(name='info')
+async def info(ctx):
+    """Menampilkan deskripsi bot dan daftar perintah."""
+    help_text = """
+**🤖 DESKRIPSI BOT**
+Bot ini adalah asisten Discord yang dapat membalas percakapan dan melakukan berbagai perintah, mulai dari operasi matematika, permainan interaktif, hingga pemrosesan file dan analisis gambar menggunakan AI.
 
+**📋 DAFTAR PERINTAH:**
 
+**Operasi Matematika:**
+`+add <angka1> <angka2>` - Menambah dua angka
+`+min <angka1> <angka2>` - Mengurangi dua angka
+`+times <angka1> <angka2>` - Mengalikan dua angka
+`+divide <angka1> <angka2>` - Membagi dua angka
+`+exp <angka1> <angka2>` - Memangkatkan dua angka
+
+**Permainan & Hiburan:**
+`+meme` - Menampilkan gambar meme acak
+`+dog` - Menampilkan foto anjing acak
+`+duck` - Menampilkan foto bebek acak
+`+coinflip` - Melempar koin (Kepala/Ekor)
+`+dice` - Melempar dadu (1-6)
+
+**Utilitas Teks & File:**
+`+tulis <teks>` - Menulis teks ke file kalimat.txt
+`+tambahkan <teks>` - Menambahkan teks ke file kalimat.txt
+`+baca` - Membaca isi file kalimat.txt
+`+repeat <jumlah> <teks>` - Mengulangi pesan beberapa kali
+`+local_drive` - Menampilkan file di folder files
+`+showfile <nama_file>` - Menampilkan file tertentu
+`+simpan` - Menyimpan file yang di-upload ke folder files
+
+**Keamanan & Data:**
+`+pw` - Generate kata sandi acak
+`+waktu` - Menampilkan waktu sekarang
+
+**Analisis Gambar (Computer Vision):**
+`+klasifikasi` - Klasifikasi gambar (Pipit/Merpati)
+`+deteksi` - Deteksi objek dalam gambar
+
+**Lainnya:**
+`+hi` - Sapaan
+`+bye` - Ucapan perpisahan
+`+joined <member>` - Lihat kapan member bergabung
+
+**ℹ️ CATATAN:**
+Ketik `+info` untuk melihat pesan ini. Bot juga dapat merespons chat biasa dengan AI!
+    """
+    await ctx.send(help_text)
+
+bot.run('TOKEN')
 
 
